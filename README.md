@@ -31,24 +31,6 @@ forms = a.PhraseFormsConcordant("красивая кошка")
 // [красивая кошка красивой кошки красивой кошке красивую кошку ...]
 ```
 
-## API
-
-### `Default() (*Analyzer, error)`
-
-Returns the shared `Analyzer` loaded from embedded dictionary data. Thread-safe; the dictionary is loaded once on first call and cached.
-
-### `(*Analyzer) WordForms(word string) []string`
-
-Returns all grammatical forms of a Russian word. The word may be in any grammatical form. Returns `nil` if the word is not found in the dictionary.
-
-### `(*Analyzer) Tag(word string) string`
-
-Returns the [OpenCorpora](http://opencorpora.org/dict.php?act=gram) tag string for the first parse of the word (e.g. `"NOUN,inan,masc sing,nomn"`). Returns an empty string if the word is not found.
-
-### `(*Analyzer) PhraseFormsConcordant(phrase string) []string`
-
-Generates all grammatical forms of a Russian phrase while preserving adjective–noun agreement. Prepositions, conjunctions, and unknown words are left unchanged.
-
 ## Dictionary
 
 The embedded dictionary is built from the OpenCorpora v0.92 dataset (revision 417127) compiled by pymorphy2 v0.9.1. It contains:
