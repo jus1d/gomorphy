@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// shared analyzer instance reused across all tests.
+// shared analyzer instance reused across all tests
 var testAnalyzer = func() *Analyzer {
 	a, err := Default()
 	if err != nil {
@@ -14,8 +14,6 @@ var testAnalyzer = func() *Analyzer {
 	}
 	return a
 }()
-
-// ── Default ───────────────────────────────────────────────────────────────────
 
 func TestDefault(t *testing.T) {
 	a, err := Default()
@@ -26,7 +24,7 @@ func TestDefault(t *testing.T) {
 		t.Fatal("Default() returned nil analyzer")
 	}
 
-	// Second call must return the exact same instance.
+	// Second call must return the exact same instance
 	a2, err := Default()
 	if err != nil {
 		t.Fatalf("Default() second call error: %v", err)
@@ -36,8 +34,6 @@ func TestDefault(t *testing.T) {
 	}
 }
 
-// ── WordForms ─────────────────────────────────────────────────────────────────
-
 func TestWordForms(t *testing.T) {
 	a := testAnalyzer
 
@@ -46,22 +42,22 @@ func TestWordForms(t *testing.T) {
 		contains []string // forms that must appear in the result
 	}{
 		{
-			// Feminine inanimate noun — full declension singular + plural.
+			// Feminine inanimate noun - full declension singular + plural
 			word:     "кошка",
 			contains: []string{"кошка", "кошки", "кошке", "кошку", "кошкой", "кошек", "кошкам", "кошками", "кошках"},
 		},
 		{
-			// Masculine inanimate noun.
+			// Masculine inanimate noun
 			word:     "стол",
 			contains: []string{"стол", "стола", "столу", "столом", "столе", "столы", "столов", "столам", "столами", "столах"},
 		},
 		{
-			// Input in genitive form — must still return full paradigm.
+			// Input in genitive form -- must still return full paradigm
 			word:     "кошки",
 			contains: []string{"кошка", "кошки", "кошке", "кошку"},
 		},
 		{
-			// Verb.
+			// Verb
 			word:     "читать",
 			contains: []string{"читать", "читаю", "читаешь", "читает", "читаем", "читаете", "читают"},
 		},
@@ -130,8 +126,6 @@ func TestWordForms_EdgeCases(t *testing.T) {
 	})
 }
 
-// ── Tag ───────────────────────────────────────────────────────────────────────
-
 func TestTag(t *testing.T) {
 	a := testAnalyzer
 
@@ -185,8 +179,6 @@ func TestTag_EdgeCases(t *testing.T) {
 	})
 }
 
-// ── PhraseFormsConcordant ─────────────────────────────────────────────────────
-
 func TestPhraseFormsConcordant(t *testing.T) {
 	a := testAnalyzer
 
@@ -195,17 +187,17 @@ func TestPhraseFormsConcordant(t *testing.T) {
 		contains []string // phrases that must appear in the result
 	}{
 		{
-			// Adjective + noun agreement.
+			// Adjective + noun agreement
 			phrase:   "красивая кошка",
 			contains: []string{"красивая кошка", "красивой кошки", "красивой кошке", "красивую кошку", "красивой кошкой"},
 		},
 		{
-			// Preposition must remain unchanged.
+			// Preposition must remain unchanged
 			phrase:   "в большом городе",
 			contains: []string{"в большом городе", "в большой город"},
 		},
 		{
-			// Single noun — delegates to WordForms.
+			// Single noun -- delegates to WordForms
 			phrase:   "кошка",
 			contains: []string{"кошка", "кошки", "кошке", "кошку"},
 		},
@@ -217,7 +209,7 @@ func TestPhraseFormsConcordant(t *testing.T) {
 			if len(forms) == 0 {
 				t.Fatalf("PhraseFormsConcordant(%q) returned empty slice", tt.phrase)
 			}
-			// Original phrase must be first.
+			// Original phrase must be first
 			if forms[0] != tt.phrase {
 				t.Errorf("PhraseFormsConcordant(%q)[0] = %q, want original phrase", tt.phrase, forms[0])
 			}
@@ -244,7 +236,7 @@ func TestPhraseFormsConcordant_EdgeCases(t *testing.T) {
 		if len(got) == 0 {
 			t.Fatal("PhraseFormsConcordant(unknown) returned empty")
 		}
-		// Unknown single word must be returned as-is.
+		// Unknown single word must be returned as-is
 		if got[0] != "ыыыыы" {
 			t.Errorf("got[0] = %q, want %q", got[0], "ыыыыы")
 		}
@@ -261,8 +253,6 @@ func TestPhraseFormsConcordant_EdgeCases(t *testing.T) {
 		}
 	})
 }
-
-// ── Tag parsing helpers ───────────────────────────────────────────────────────
 
 func TestTagPOS(t *testing.T) {
 	tests := []struct {
