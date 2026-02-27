@@ -12,7 +12,7 @@
 //	forms := a.WordForms("кошка")           // all grammatical forms of a word
 //	tag   := a.Tag("кошка")                 // "NOUN,inan,femn sing,nomn"
 //	forms  = a.PhraseFormsConcordant("красивая кошка") // phrase with agreement
-package morph
+package gomorphy
 
 import (
 	"bytes"
@@ -89,8 +89,9 @@ func (a *Analyzer) WordForms(word string) []string {
 	return forms
 }
 
-// Tag returns the OpenCorpora tag string for the first parse of the word,
+// Tag returns the OpenCorpora tag string for the best parse of the word,
 // e.g. "NOUN,inan,masc sing,nomn"
+// When multiple parses exist, nominals (NOUN/ADJF) are preferred over verbs.
 // Returns an empty string if the word is not found in the dictionary
 func (a *Analyzer) Tag(word string) string {
 	word = strings.ToLower(strings.TrimSpace(word))
@@ -98,14 +99,39 @@ func (a *Analyzer) Tag(word string) string {
 	if len(entries) == 0 {
 		return ""
 	}
-	e := entries[0]
-	para := a.paradigms[e.paradigmID]
-	n := len(para) / 3
-	tagID := para[n+int(e.formIdx)]
-	if int(tagID) >= len(a.gramtab) {
-		return ""
+	return a.bestTag(entries)
+}
+
+// posPriority defines disambiguation preference: lower = preferred.
+var posPriority = map[string]int{
+	"NOUN": 1, "NPRO": 1,
+	"ADJF": 2, "ADJS": 2, "PRTF": 2, "PRTS": 2,
+	"NUMR": 3, "ADVB": 3,
+	"VERB": 4, "INFN": 4, "GRND": 4,
+}
+
+// bestTag picks the tag from entries with the highest-priority POS.
+func (a *Analyzer) bestTag(entries []wordEntry) string {
+	best := ""
+	bestPri := 99
+	for _, e := range entries {
+		para := a.paradigms[e.paradigmID]
+		n := len(para) / 3
+		tagID := para[n+int(e.formIdx)]
+		if int(tagID) >= len(a.gramtab) {
+			continue
+		}
+		t := a.gramtab[tagID]
+		pri, ok := posPriority[tagPOS(t)]
+		if !ok {
+			pri = 10
+		}
+		if best == "" || pri < bestPri {
+			best = t
+			bestPri = pri
+		}
 	}
-	return a.gramtab[tagID]
+	return best
 }
 
 // PhraseFormsConcordant generates all grammatical forms of a Russian phrase
@@ -293,27 +319,50 @@ func (a *Analyzer) loadParadigms(raw []byte) error {
 
 // inflect declines word to the requested case/number/gender/animacy
 // Empty strings for gender and animacy mean "don't care"
-// Returns the original word if no matching form is found
+// All parses are tried in POS-priority order; returns the original word if no match found
 func (a *Analyzer) inflect(word, cas, number, gender, animacy string) string {
 	entries := a.words.get(word)
 	if len(entries) == 0 {
 		return word
 	}
-	e := entries[0]
-	para := a.paradigms[e.paradigmID]
-	n := len(para) / 3
 
-	stem, ok := a.extractStem(word, para, n, int(e.formIdx))
-	if !ok {
-		return word
+	// Sort entries by POS priority so nominals are tried first
+	sorted := make([]wordEntry, len(entries))
+	copy(sorted, entries)
+	for i := 1; i < len(sorted); i++ {
+		for j := i; j > 0 && a.entryPriority(sorted[j]) < a.entryPriority(sorted[j-1]); j-- {
+			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
+		}
 	}
 
-	for i := 0; i < n; i++ {
-		if tagMatches(a.gramtab[para[n+i]], cas, number, gender, animacy) {
-			return paradigmPrefixes[para[2*n+i]] + stem + a.suffixes[para[i]]
+	for _, e := range sorted {
+		para := a.paradigms[e.paradigmID]
+		n := len(para) / 3
+		stem, ok := a.extractStem(word, para, n, int(e.formIdx))
+		if !ok {
+			continue
+		}
+		for i := 0; i < n; i++ {
+			if tagMatches(a.gramtab[para[n+i]], cas, number, gender, animacy) {
+				return paradigmPrefixes[para[2*n+i]] + stem + a.suffixes[para[i]]
+			}
 		}
 	}
 	return word
+}
+
+func (a *Analyzer) entryPriority(e wordEntry) int {
+	para := a.paradigms[e.paradigmID]
+	n := len(para) / 3
+	tagID := para[n+int(e.formIdx)]
+	if int(tagID) >= len(a.gramtab) {
+		return 99
+	}
+	pri, ok := posPriority[tagPOS(a.gramtab[tagID])]
+	if !ok {
+		return 10
+	}
+	return pri
 }
 
 // inflectAdj inflects an adjective, applying the Russian accusative rule:

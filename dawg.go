@@ -3,7 +3,7 @@
 //
 // Binary DAWG format is compatible with dawg-python / dawg C-extension.
 // See: https://github.com/pytries/dawg-python
-package morph
+package gomorphy
 
 import (
 	"encoding/base64"

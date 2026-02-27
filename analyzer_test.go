@@ -1,4 +1,4 @@
-package morph
+package gomorphy
 
 import (
 	"slices"
@@ -136,9 +136,15 @@ func TestTag(t *testing.T) {
 	}{
 		{"кошка", "NOUN", "NOUN,inan,femn sing,nomn"},
 		{"стол", "NOUN", "NOUN,inan,masc sing,nomn"},
+		// "день" is ambiguous: it also matches the verb "деть" (to put).
+		// POS-priority disambiguation must resolve it as a noun.
+		{"день", "NOUN", "NOUN,inan,masc sing,nomn"},
 		{"красивый", "ADJF", ""},
 		{"читать", "INFN", ""},
-		{"быстро", "ADVB", ""},
+		// "всегда" is unambiguously an adverb; "быстро" is avoided because it
+		// also parses as ADJS (short adjective neuter), which the POS-priority
+		// logic now prefers.
+		{"всегда", "ADVB", ""},
 	}
 
 	for _, tt := range tests {
