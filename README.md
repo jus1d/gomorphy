@@ -26,7 +26,7 @@ forms := a.WordForms("кошка")
 tag := a.Tag("кошка")
 // "NOUN,inan,femn sing,nomn"
 
-// All forms of a phrase with adjective–noun agreement
+// All forms of a phrase (or a word) with adjective–noun agreement
 forms = a.PhraseFormsConcordant("красивая кошка")
 // [красивая кошка красивой кошки красивой кошке красивую кошку ...]
 ```
