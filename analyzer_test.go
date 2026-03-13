@@ -198,14 +198,38 @@ func TestPhraseFormsConcordant(t *testing.T) {
 			contains: []string{"красивая кошка", "красивой кошки", "красивой кошке", "красивую кошку", "красивой кошкой"},
 		},
 		{
-			// Preposition must remain unchanged
+			// Preposition stays unchanged; adjective agrees with noun head
 			phrase:   "в большом городе",
-			contains: []string{"в большом городе", "в большой город"},
+			contains: []string{"в большом городе", "в большой город", "в большого города", "в большому городу"},
 		},
 		{
-			// Single noun -- delegates to WordForms
+			// Genitive chain: only the first noun (head) is declined;
+			// "защитника" and "отечества" are genitive dependents and must stay unchanged.
+			// Regression for "день" / mobile-vowel nouns.
+			phrase:   "день защитника отечества",
+			contains: []string{
+				"день защитника отечества",   // nomn sing
+				"дня защитника отечества",    // gent sing
+				"дню защитника отечества",    // datv sing
+				"днём защитника отечества",   // ablt sing
+				"дне защитника отечества",    // loct sing
+				"дни защитника отечества",    // nomn plur
+				"дней защитника отечества",   // gent plur
+				"дням защитника отечества",   // datv plur
+				"днями защитника отечества",  // ablt plur
+				"днях защитника отечества",   // loct plur
+			},
+		},
+		{
+			// Single noun in nominative singular
 			phrase:   "кошка",
 			contains: []string{"кошка", "кошки", "кошке", "кошку"},
+		},
+		{
+			// Single noun supplied in plural — forms[0] must match input, not nominative singular.
+			// Regression: WordForms always starts from nomn sing; PhraseFormsConcordant must reorder.
+			phrase:   "кошки",
+			contains: []string{"кошки", "кошка", "кошке", "кошку"},
 		},
 	}
 

@@ -137,9 +137,11 @@ func (a *Analyzer) bestTag(entries []wordEntry) string {
 // PhraseFormsConcordant generates all grammatical forms of a Russian phrase
 // while keeping adjective–noun agreement intact
 //
-// The rightmost noun (or pronoun) is treated as the grammatical head
+// The first noun (or pronoun) is treated as the grammatical head.
 // For every case × number combination the head is declined, and any
-// adjectives/participles are agreed in case, number, gender, and animacy
+// preceding adjectives/participles are agreed in case, number, gender, and animacy.
+// Nouns other than the head (genitive dependents, e.g. "защитника отечества" in
+// "день защитника отечества") are left in their original form.
 // Prepositions, conjunctions, and words not found in the dictionary are
 // left unchanged. The original phrase is always the first element of the
 // returned slice
@@ -151,10 +153,22 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 	}
 
 	if len(words) == 1 {
-		if forms := a.WordForms(words[0]); forms != nil {
-			return forms
+		forms := a.WordForms(words[0])
+		if forms == nil {
+			return []string{words[0]}
 		}
-		return []string{words[0]}
+		// Ensure the input form (which may be non-nominative) is first.
+		// WordForms always starts from nominative singular; move the actual
+		// input form to position 0 if it differs.
+		if forms[0] != words[0] {
+			for i, f := range forms {
+				if f == words[0] {
+					forms = append([]string{f}, append(forms[:i:i], forms[i+1:]...)...)
+					break
+				}
+			}
+		}
+		return forms
 	}
 
 	type wordInfo struct {
@@ -179,7 +193,7 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 			animacy: tagGrammeme(tag, []string{"anim", "inan"}),
 			gender:  tagGrammeme(tag, []string{"masc", "femn", "neut"}),
 		}
-		if pos == "NOUN" || pos == "NPRO" {
+		if (pos == "NOUN" || pos == "NPRO") && headIdx == -1 {
 			headIdx = i
 		}
 	}
@@ -217,7 +231,11 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 				}
 				switch infos[i].pos {
 				case "NOUN", "NPRO":
-					declined[i] = a.inflect(w, cas, number, "", "")
+					if i == headIdx {
+						declined[i] = a.inflect(w, cas, number, "", "")
+					} else {
+						declined[i] = w // genitive dependent -- leave unchanged
+					}
 				case "ADJF", "PRTF":
 					declined[i] = a.inflectAdj(w, cas, number, head.gender, head.animacy)
 				default:
