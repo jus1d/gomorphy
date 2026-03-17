@@ -284,6 +284,60 @@ func TestPhraseFormsConcordant_EdgeCases(t *testing.T) {
 	})
 }
 
+func TestPhraseFormsConcordant_QuotedSegments(t *testing.T) {
+	a := testAnalyzer
+
+	quoteStyles := []struct {
+		name   string
+		open   string
+		close  string
+	}{
+		{"double", `"`, `"`},
+		{"guillemets", "«", "»"},
+		{"german", "„", "\u201D"},
+		{"curly-double", "\u201C", "\u201D"},
+	}
+
+	for _, qs := range quoteStyles {
+		t.Run(qs.name, func(t *testing.T) {
+			phrase := "компания " + qs.open + "золотой ключ" + qs.close
+			forms := a.PhraseFormsConcordant(phrase)
+			if len(forms) == 0 {
+				t.Fatalf("PhraseFormsConcordant(%q) returned empty", phrase)
+			}
+			quoted := qs.open + "золотой ключ" + qs.close
+			for _, f := range forms {
+				if !strings.Contains(f, quoted) {
+					t.Errorf("form %q does not preserve quoted segment %q", f, quoted)
+				}
+			}
+		})
+	}
+
+	t.Run("first form is original", func(t *testing.T) {
+		phrase := `компания "золотой ключ"`
+		forms := a.PhraseFormsConcordant(phrase)
+		if len(forms) == 0 || forms[0] != phrase {
+			t.Errorf("first form = %q, want %q", forms[0], phrase)
+		}
+	})
+
+	t.Run("head noun is declined", func(t *testing.T) {
+		// "компания" must appear in multiple cases; quoted part stays intact
+		phrase := `компания "золотой ключ"`
+		forms := a.PhraseFormsConcordant(phrase)
+		var hasGenitive bool
+		for _, f := range forms {
+			if strings.HasPrefix(f, "компании") {
+				hasGenitive = true
+			}
+		}
+		if !hasGenitive {
+			t.Errorf("expected genitive form of компания among: %v", forms)
+		}
+	})
+}
+
 func TestTagPOS(t *testing.T) {
 	tests := []struct {
 		tag  string

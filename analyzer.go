@@ -143,26 +143,38 @@ func (a *Analyzer) bestTag(entries []wordEntry) string {
 // Nouns other than the head (genitive dependents, e.g. "защитника отечества" in
 // "день защитника отечества") are left in their original form.
 // Prepositions, conjunctions, and words not found in the dictionary are
-// left unchanged. The original phrase is always the first element of the
-// returned slice
+// left unchanged. Quoted segments (using any quote style: "", «», „", '' etc.)
+// are always preserved verbatim and never declined.
+// The original phrase is always the first element of the returned slice
 func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 	phrase = strings.ToLower(strings.TrimSpace(phrase))
-	words := strings.Fields(phrase)
-	if len(words) == 0 {
+	tokens := tokenizePhrase(phrase)
+	if len(tokens) == 0 {
 		return nil
 	}
 
-	if len(words) == 1 {
-		forms := a.WordForms(words[0])
+	// Collect plain (non-quoted) words for single-word fast path
+	plainTokens := 0
+	firstPlain := ""
+	for _, t := range tokens {
+		if !t.quoted {
+			plainTokens++
+			if firstPlain == "" {
+				firstPlain = t.text
+			}
+		}
+	}
+
+	if len(tokens) == 1 && !tokens[0].quoted {
+		w := tokens[0].text
+		forms := a.WordForms(w)
 		if forms == nil {
-			return []string{words[0]}
+			return []string{w}
 		}
 		// Ensure the input form (which may be non-nominative) is first.
-		// WordForms always starts from nominative singular; move the actual
-		// input form to position 0 if it differs.
-		if forms[0] != words[0] {
+		if forms[0] != w {
 			for i, f := range forms {
-				if f == words[0] {
+				if f == w {
 					forms = append([]string{f}, append(forms[:i:i], forms[i+1:]...)...)
 					break
 				}
@@ -176,14 +188,14 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 		animacy string
 		gender  string
 	}
-	infos := make([]wordInfo, len(words))
+	infos := make([]wordInfo, len(tokens))
 	headIdx := -1
 
-	for i, w := range words {
-		if serviceWords[w] {
+	for i, t := range tokens {
+		if t.quoted || serviceWords[t.text] {
 			continue
 		}
-		tag := a.Tag(w)
+		tag := a.Tag(t.text)
 		if tag == "" {
 			continue
 		}
@@ -203,11 +215,11 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 
 	if headIdx == -1 {
 		// No noun found -- flatten individual word forms
-		for _, w := range words {
-			if serviceWords[w] {
+		for _, t := range tokens {
+			if t.quoted || serviceWords[t.text] {
 				continue
 			}
-			for _, f := range a.WordForms(w) {
+			for _, f := range a.WordForms(t.text) {
 				if _, ok := seen[f]; !ok {
 					seen[f] = struct{}{}
 					result = append(result, f)
@@ -223,23 +235,23 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 
 	for _, number := range numbers {
 		for _, cas := range cases {
-			declined := make([]string, len(words))
-			for i, w := range words {
-				if serviceWords[w] {
-					declined[i] = w
+			declined := make([]string, len(tokens))
+			for i, t := range tokens {
+				if t.quoted || serviceWords[t.text] {
+					declined[i] = t.text
 					continue
 				}
 				switch infos[i].pos {
 				case "NOUN", "NPRO":
 					if i == headIdx {
-						declined[i] = a.inflect(w, cas, number, "", "")
+						declined[i] = a.inflect(t.text, cas, number, "", "")
 					} else {
-						declined[i] = w // genitive dependent -- leave unchanged
+						declined[i] = t.text // genitive dependent -- leave unchanged
 					}
 				case "ADJF", "PRTF":
-					declined[i] = a.inflectAdj(w, cas, number, head.gender, head.animacy)
+					declined[i] = a.inflectAdj(t.text, cas, number, head.gender, head.animacy)
 				default:
-					declined[i] = w
+					declined[i] = t.text
 				}
 			}
 			form := strings.Join(declined, " ")
@@ -250,6 +262,64 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 		}
 	}
 	return result
+}
+
+// phraseToken is a single element of a tokenized phrase.
+// quoted tokens are quoted segments that must not be declined.
+type phraseToken struct {
+	text   string
+	quoted bool
+}
+
+// quoteClose maps an opening quote rune to its expected closing rune.
+// Straight quotes ('"', '\'') close with the same character.
+var quoteClose = map[rune]rune{
+	'«':  '»',
+	'„':  '"',
+	'\u201C': '\u201D', // " → "
+	'\u2018': '\u2019', // ' → '
+	'"':  '"',
+	'\'': '\'',
+}
+
+// tokenizePhrase splits s into tokens, treating quoted spans as single opaque tokens.
+// Supported quote styles: "" '' «» „" \u201C\u201D \u2018\u2019
+func tokenizePhrase(s string) []phraseToken {
+	runes := []rune(s)
+	var tokens []phraseToken
+	i := 0
+	for i < len(runes) {
+		// skip whitespace
+		for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
+			i++
+		}
+		if i >= len(runes) {
+			break
+		}
+		if close, ok := quoteClose[runes[i]]; ok {
+			// quoted segment: consume until matching close quote
+			start := i
+			i++
+			for i < len(runes) && runes[i] != close {
+				i++
+			}
+			if i < len(runes) {
+				i++ // include closing quote
+			}
+			tokens = append(tokens, phraseToken{text: string(runes[start:i]), quoted: true})
+		} else {
+			// plain word: consume until whitespace or opening quote
+			start := i
+			for i < len(runes) && runes[i] != ' ' && runes[i] != '\t' {
+				if _, ok := quoteClose[runes[i]]; ok {
+					break
+				}
+				i++
+			}
+			tokens = append(tokens, phraseToken{text: string(runes[start:i]), quoted: false})
+		}
+	}
+	return tokens
 }
 
 var (
