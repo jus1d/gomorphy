@@ -214,18 +214,7 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 	result := []string{phrase}
 
 	if headIdx == -1 {
-		// No noun found -- flatten individual word forms
-		for _, t := range tokens {
-			if t.quoted || serviceWords[t.text] {
-				continue
-			}
-			for _, f := range a.WordForms(t.text) {
-				if _, ok := seen[f]; !ok {
-					seen[f] = struct{}{}
-					result = append(result, f)
-				}
-			}
-		}
+		// No noun found -- cannot decline the phrase, return as-is
 		return result
 	}
 
@@ -284,13 +273,22 @@ var quoteClose = map[rune]rune{
 
 // tokenizePhrase splits s into tokens, treating quoted spans as single opaque tokens.
 // Supported quote styles: "" '' «» „" \u201C\u201D \u2018\u2019
+// trailingPunct is the set of punctuation characters stripped from plain token ends.
+var trailingPunct = map[rune]bool{
+	'.': true, ',': true, ':': true, ';': true, '!': true, '?': true,
+}
+
+func isWhitespace(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r'
+}
+
 func tokenizePhrase(s string) []phraseToken {
 	runes := []rune(s)
 	var tokens []phraseToken
 	i := 0
 	for i < len(runes) {
 		// skip whitespace
-		for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
+		for i < len(runes) && isWhitespace(runes[i]) {
 			i++
 		}
 		if i >= len(runes) {
@@ -310,13 +308,20 @@ func tokenizePhrase(s string) []phraseToken {
 		} else {
 			// plain word: consume until whitespace or opening quote
 			start := i
-			for i < len(runes) && runes[i] != ' ' && runes[i] != '\t' {
+			for i < len(runes) && !isWhitespace(runes[i]) {
 				if _, ok := quoteClose[runes[i]]; ok {
 					break
 				}
 				i++
 			}
-			tokens = append(tokens, phraseToken{text: string(runes[start:i]), quoted: false})
+			// strip trailing punctuation
+			end := i
+			for end > start && trailingPunct[runes[end-1]] {
+				end--
+			}
+			if end > start {
+				tokens = append(tokens, phraseToken{text: string(runes[start:end]), quoted: false})
+			}
 		}
 	}
 	return tokens
