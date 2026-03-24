@@ -12,6 +12,14 @@ linters:
     - unconvert
     - unparam
     - gocritic
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+        - name: unused-parameter
+        - name: error-return
+        - name: error-strings
 
 formatters:
   enable:
@@ -21,15 +29,6 @@ formatters:
     goimports:
       local-prefixes:
         - github.com/jus1d/gomorphy
-
-linters-settings:
-  revive:
-    rules:
-      - name: exported
-      - name: var-naming
-      - name: unused-parameter
-      - name: error-return
-      - name: error-strings
 
 issues:
   max-same-issues: 0
