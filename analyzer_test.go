@@ -206,18 +206,18 @@ func TestPhraseFormsConcordant(t *testing.T) {
 			// Genitive chain: only the first noun (head) is declined;
 			// "защитника" and "отечества" are genitive dependents and must stay unchanged.
 			// Regression for "день" / mobile-vowel nouns.
-			phrase:   "день защитника отечества",
+			phrase: "день защитника отечества",
 			contains: []string{
-				"день защитника отечества",   // nomn sing
-				"дня защитника отечества",    // gent sing
-				"дню защитника отечества",    // datv sing
-				"днём защитника отечества",   // ablt sing
-				"дне защитника отечества",    // loct sing
-				"дни защитника отечества",    // nomn plur
-				"дней защитника отечества",   // gent plur
-				"дням защитника отечества",   // datv plur
-				"днями защитника отечества",  // ablt plur
-				"днях защитника отечества",   // loct plur
+				"день защитника отечества",  // nomn sing
+				"дня защитника отечества",   // gent sing
+				"дню защитника отечества",   // datv sing
+				"днём защитника отечества",  // ablt sing
+				"дне защитника отечества",   // loct sing
+				"дни защитника отечества",   // nomn plur
+				"дней защитника отечества",  // gent plur
+				"дням защитника отечества",  // datv plur
+				"днями защитника отечества", // ablt plur
+				"днях защитника отечества",  // loct plur
 			},
 		},
 		{
@@ -288,9 +288,9 @@ func TestPhraseFormsConcordant_QuotedSegments(t *testing.T) {
 	a := testAnalyzer
 
 	quoteStyles := []struct {
-		name   string
-		open   string
-		close  string
+		name  string
+		open  string
+		close string
 	}{
 		{"double", `"`, `"`},
 		{"guillemets", "«", "»"},
