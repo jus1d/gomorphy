@@ -1,4 +1,4 @@
-// Package morph provides Russian morphological analysis backed by pymorphy3
+// Package gomorphy provides Russian morphological analysis backed by pymorphy3
 // dictionaries (OpenCorpora). The dictionary files are embedded at compile time.
 //
 // Binary DAWG format is compatible with dawg-python / dawg C-extension.
@@ -22,7 +22,6 @@ const (
 )
 
 func unitHasLeaf(u uint32) bool { return u&hasLeafBit != 0 }
-func unitValue(u uint32) uint32 { return u & ^isLeafBit }
 func unitLabel(u uint32) uint32 { return u & (isLeafBit | 0xFF) }
 func unitOffset(u uint32) uint32 {
 	return ((u >> 10) << ((u & extensionBit) >> 6)) & precisionMask
@@ -35,12 +34,6 @@ type dictionary struct {
 
 func (d *dictionary) hasValue(index uint32) bool {
 	return unitHasLeaf(d.units[index])
-}
-
-func (d *dictionary) value(index uint32) uint32 {
-	off := unitOffset(d.units[index])
-	vi := (index ^ off) & precisionMask
-	return unitValue(d.units[vi])
 }
 
 // followChar follows a single byte transition from index.
@@ -83,7 +76,6 @@ type guide struct {
 
 func (g *guide) child(index uint32) byte   { return g.units[index*2] }
 func (g *guide) sibling(index uint32) byte { return g.units[index*2+1] }
-func (g *guide) size() int                 { return len(g.units) }
 
 func (g *guide) read(r io.Reader) error {
 	var size uint32

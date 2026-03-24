@@ -1,4 +1,4 @@
-// Package morph provides Russian morphological analysis backed by pymorphy3
+// Package gomorphy provides Russian morphological analysis backed by pymorphy3
 // dictionaries (OpenCorpora). All dictionary data is embedded at compile time,
 // so the binary is fully self-contained with no runtime dependencies
 //
@@ -143,7 +143,7 @@ func (a *Analyzer) bestTag(entries []wordEntry) string {
 // Nouns other than the head (genitive dependents, e.g. "защитника отечества" in
 // "день защитника отечества") are left in their original form.
 // Prepositions, conjunctions, and words not found in the dictionary are
-// left unchanged. Quoted segments (using any quote style: "", «», „", '' etc.)
+// left unchanged. Quoted segments (using any quote style: "", «», „", ” etc.)
 // are always preserved verbatim and never declined.
 // The original phrase is always the first element of the returned slice
 func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
@@ -261,18 +261,18 @@ type phraseToken struct {
 }
 
 // quoteClose maps an opening quote rune to its expected closing rune.
-// Straight quotes ('"', '\'') close with the same character.
+// Straight quotes ('"', '\”) close with the same character.
 var quoteClose = map[rune]rune{
-	'«':  '»',
-	'„':  '"',
+	'«':      '»',
+	'„':      '"',
 	'\u201C': '\u201D', // " → "
 	'\u2018': '\u2019', // ' → '
-	'"':  '"',
-	'\'': '\'',
+	'"':      '"',
+	'\'':     '\'',
 }
 
 // tokenizePhrase splits s into tokens, treating quoted spans as single opaque tokens.
-// Supported quote styles: "" '' «» „" \u201C\u201D \u2018\u2019
+// Supported quote styles: "" ” «» „" \u201C\u201D \u2018\u2019
 // trailingPunct is the set of punctuation characters stripped from plain token ends.
 var trailingPunct = map[rune]bool{
 	'.': true, ',': true, ':': true, ';': true, '!': true, '?': true,
@@ -294,11 +294,11 @@ func tokenizePhrase(s string) []phraseToken {
 		if i >= len(runes) {
 			break
 		}
-		if close, ok := quoteClose[runes[i]]; ok {
+		if closeQuote, ok := quoteClose[runes[i]]; ok {
 			// quoted segment: consume until matching close quote
 			start := i
 			i++
-			for i < len(runes) && runes[i] != close {
+			for i < len(runes) && runes[i] != closeQuote {
 				i++
 			}
 			if i < len(runes) {
@@ -498,9 +498,6 @@ func (a *Analyzer) extractStem(word string, para []uint16, n, formIdx int) (stri
 		return "", false
 	}
 	stem := word[len(prefix) : len(word)-len(suffix)]
-	if len(stem) < 0 { // guard: len(prefix)+len(suffix) > len(word)
-		return "", false
-	}
 	return stem, true
 }
 

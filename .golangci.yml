@@ -1,0 +1,34 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+    - gocritic
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+        - name: unused-parameter
+        - name: error-return
+        - name: error-strings
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/jus1d/gomorphy
+
+issues:
+  max-same-issues: 0
