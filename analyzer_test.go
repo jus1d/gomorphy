@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 // shared analyzer instance reused across all tests
@@ -99,18 +100,29 @@ func TestWordForms_EdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("case insensitive", func(t *testing.T) {
+	t.Run("case preservation", func(t *testing.T) {
 		lower := a.WordForms("кошка")
 		upper := a.WordForms("КОШКА")
-		mixed := a.WordForms("Кошка")
-		if lower == nil || upper == nil || mixed == nil {
+		title := a.WordForms("Кошка")
+		if lower == nil || upper == nil || title == nil {
 			t.Fatal("WordForms returned nil for some casing variant")
 		}
-		if strings.Join(lower, ",") != strings.Join(upper, ",") {
-			t.Error("WordForms differs for lower vs upper case")
+		// Lowercase input returns lowercase forms
+		for _, f := range lower {
+			if f != strings.ToLower(f) {
+				t.Errorf("lowercase input produced non-lowercase form: %q", f)
+			}
 		}
-		if strings.Join(lower, ",") != strings.Join(mixed, ",") {
-			t.Error("WordForms differs for lower vs mixed case")
+		// Uppercase input returns uppercase forms
+		for _, f := range upper {
+			if f != strings.ToUpper(f) {
+				t.Errorf("uppercase input produced non-uppercase form: %q", f)
+			}
+		}
+		// Title case input returns title case forms
+		runes := []rune(title[0])
+		if !unicode.IsUpper(runes[0]) {
+			t.Errorf("title case input first form should start with upper: %q", title[0])
 		}
 	})
 
@@ -334,6 +346,53 @@ func TestPhraseFormsConcordant_QuotedSegments(t *testing.T) {
 		}
 		if !hasGenitive {
 			t.Errorf("expected genitive form of компания among: %v", forms)
+		}
+	})
+}
+
+func TestPhraseFormsConcordant_CasePreservation(t *testing.T) {
+	a := testAnalyzer
+
+	t.Run("title case phrase", func(t *testing.T) {
+		forms := a.PhraseFormsConcordant("Красивая Кошка")
+		if len(forms) == 0 {
+			t.Fatal("empty result")
+		}
+		if forms[0] != "Красивая Кошка" {
+			t.Errorf("first form = %q, want %q", forms[0], "Красивая Кошка")
+		}
+		// All forms should have title case words
+		for _, f := range forms {
+			words := strings.Fields(f)
+			for _, w := range words {
+				runes := []rune(w)
+				if len(runes) > 0 && unicode.IsLetter(runes[0]) && !unicode.IsUpper(runes[0]) {
+					t.Errorf("form %q has lowercase word %q, expected title case", f, w)
+				}
+			}
+		}
+	})
+
+	t.Run("uppercase phrase", func(t *testing.T) {
+		forms := a.PhraseFormsConcordant("КРАСИВАЯ КОШКА")
+		if len(forms) == 0 {
+			t.Fatal("empty result")
+		}
+		if forms[0] != "КРАСИВАЯ КОШКА" {
+			t.Errorf("first form = %q, want %q", forms[0], "КРАСИВАЯ КОШКА")
+		}
+	})
+
+	t.Run("single word title case", func(t *testing.T) {
+		forms := a.PhraseFormsConcordant("Кошка")
+		if len(forms) == 0 {
+			t.Fatal("empty result")
+		}
+		if forms[0] != "Кошка" {
+			t.Errorf("first form = %q, want %q", forms[0], "Кошка")
+		}
+		if !slices.Contains(forms, "Кошки") {
+			t.Errorf("expected Кошки in forms: %v", forms)
 		}
 	})
 }
