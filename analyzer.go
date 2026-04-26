@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 )
 
 //go:embed data/words.dawg data/paradigms.array data/suffixes.json data/gramtab-opencorpora-int.json data/meta.json
@@ -53,12 +55,14 @@ func Default() (*Analyzer, error) {
 // The word may be supplied in any grammatical form
 // Returns nil if the word is not found in the dictionary
 func (a *Analyzer) WordForms(word string) []string {
-	word = strings.ToLower(strings.TrimSpace(word))
-	if word == "" {
+	trimmed := strings.TrimSpace(word)
+	style := detectCase(trimmed)
+	lower := strings.ToLower(trimmed)
+	if lower == "" {
 		return nil
 	}
 
-	entries := a.words.get(word)
+	entries := a.words.get(lower)
 	if len(entries) == 0 {
 		return nil
 	}
@@ -72,7 +76,7 @@ func (a *Analyzer) WordForms(word string) []string {
 		return nil
 	}
 
-	stem, ok := a.extractStem(word, para, n, int(e.formIdx))
+	stem, ok := a.extractStem(lower, para, n, int(e.formIdx))
 	if !ok {
 		return nil
 	}
@@ -80,7 +84,7 @@ func (a *Analyzer) WordForms(word string) []string {
 	seen := make(map[string]struct{}, n)
 	forms := make([]string, 0, n)
 	for i := 0; i < n; i++ {
-		f := paradigmPrefixes[para[2*n+i]] + stem + a.suffixes[para[i]]
+		f := applyCase(paradigmPrefixes[para[2*n+i]]+stem+a.suffixes[para[i]], style)
 		if _, dup := seen[f]; !dup {
 			seen[f] = struct{}{}
 			forms = append(forms, f)
@@ -147,21 +151,19 @@ func (a *Analyzer) bestTag(entries []wordEntry) string {
 // are always preserved verbatim and never declined.
 // The original phrase is always the first element of the returned slice
 func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
-	phrase = strings.ToLower(strings.TrimSpace(phrase))
-	tokens := tokenizePhrase(phrase)
+	origPhrase := strings.TrimSpace(phrase)
+	lowerPhrase := strings.ToLower(origPhrase)
+	tokens := tokenizePhrase(lowerPhrase)
 	if len(tokens) == 0 {
 		return nil
 	}
 
-	// Collect plain (non-quoted) words for single-word fast path
-	plainTokens := 0
-	firstPlain := ""
-	for _, t := range tokens {
-		if !t.quoted {
-			plainTokens++
-			if firstPlain == "" {
-				firstPlain = t.text
-			}
+	// Detect case styles from original phrase tokens
+	origTokens := tokenizePhrase(origPhrase)
+	styles := make([]caseStyle, len(tokens))
+	for i := range tokens {
+		if i < len(origTokens) && !tokens[i].quoted {
+			styles[i] = detectCase(origTokens[i].text)
 		}
 	}
 
@@ -169,12 +171,17 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 		w := tokens[0].text
 		forms := a.WordForms(w)
 		if forms == nil {
-			return []string{w}
+			return []string{origPhrase}
 		}
-		// Ensure the input form (which may be non-nominative) is first.
-		if forms[0] != w {
+		// Apply original case to all forms
+		for i := range forms {
+			forms[i] = applyCase(forms[i], styles[0])
+		}
+		// Ensure the input form is first.
+		target := applyCase(w, styles[0])
+		if forms[0] != target {
 			for i, f := range forms {
-				if f == w {
+				if f == target {
 					forms = append([]string{f}, append(forms[:i:i], forms[i+1:]...)...)
 					break
 				}
@@ -210,11 +217,10 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 		}
 	}
 
-	seen := map[string]struct{}{phrase: {}}
-	result := []string{phrase}
+	seen := map[string]struct{}{origPhrase: {}}
+	result := []string{origPhrase}
 
 	if headIdx == -1 {
-		// No noun found -- cannot decline the phrase, return as-is
 		return result
 	}
 
@@ -230,18 +236,20 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 					declined[i] = t.text
 					continue
 				}
+				var raw string
 				switch infos[i].pos {
 				case "NOUN", "NPRO":
 					if i == headIdx {
-						declined[i] = a.inflect(t.text, cas, number, "", "")
+						raw = a.inflect(t.text, cas, number, "", "")
 					} else {
-						declined[i] = t.text // genitive dependent -- leave unchanged
+						raw = t.text
 					}
 				case "ADJF", "PRTF":
-					declined[i] = a.inflectAdj(t.text, cas, number, head.gender, head.animacy)
+					raw = a.inflectAdj(t.text, cas, number, head.gender, head.animacy)
 				default:
-					declined[i] = t.text
+					raw = t.text
 				}
+				declined[i] = applyCase(raw, styles[i])
 			}
 			form := strings.Join(declined, " ")
 			if _, ok := seen[form]; !ok {
@@ -251,6 +259,55 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 		}
 	}
 	return result
+}
+
+// caseStyle represents the casing pattern of a word.
+type caseStyle int
+
+const (
+	caseLower caseStyle = iota // all lowercase
+	caseUpper                  // ALL UPPERCASE
+	caseTitle                  // Title case (first letter upper, rest lower)
+)
+
+// detectCase returns the casing style of a word.
+func detectCase(word string) caseStyle {
+	if word == "" {
+		return caseLower
+	}
+	firstRune, _ := utf8.DecodeRuneInString(word)
+	if !unicode.IsUpper(firstRune) {
+		return caseLower
+	}
+	// First letter is upper — check if all are upper
+	allUpper := true
+	for _, r := range word {
+		if unicode.IsLetter(r) && !unicode.IsUpper(r) {
+			allUpper = false
+			break
+		}
+	}
+	if allUpper {
+		return caseUpper
+	}
+	return caseTitle
+}
+
+// applyCase transforms a lowercase word to match the given casing style.
+func applyCase(word string, style caseStyle) string {
+	switch style {
+	case caseUpper:
+		return strings.ToUpper(word)
+	case caseTitle:
+		runes := []rune(word)
+		if len(runes) == 0 {
+			return word
+		}
+		runes[0] = unicode.ToUpper(runes[0])
+		return string(runes)
+	default:
+		return word
+	}
 }
 
 // phraseToken is a single element of a tokenized phrase.
