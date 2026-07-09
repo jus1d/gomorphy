@@ -11,11 +11,11 @@ go get github.com/jus1d/gomorphy
 ## Usage
 
 ```go
-import "github.com/jus1d/gomorphy"
+import morph "github.com/jus1d/gomorphy"
 
 a, err := morph.Default()
 if err != nil {
-    log.Fatal(err)
+	log.Fatal(err)
 }
 
 // All grammatical forms of a word
