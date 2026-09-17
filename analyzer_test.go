@@ -456,3 +456,78 @@ func TestTagMatches(t *testing.T) {
 		}
 	}
 }
+
+func TestPhraseFormsConcordant_DependentGroupNotDeclined(t *testing.T) {
+	a := testAnalyzer
+
+	phrase := "Королевский объединенный институт оборонных исследований"
+	forms := a.PhraseFormsConcordant(phrase)
+
+	// Adjectives before the head agree with it; "оборонных исследований" is a
+	// dependent group after the head and must stay in genitive plural.
+	if !slices.Contains(forms, "Королевским объединенным институтом оборонных исследований") {
+		t.Errorf("missing fully agreed instrumental form: %v", forms)
+	}
+	for _, f := range forms {
+		if !strings.HasSuffix(f, "оборонных исследований") {
+			t.Errorf("dependent group was declined in %q", f)
+		}
+	}
+}
+
+func TestPhraseFormsConcordant_HyphenatedAdjective(t *testing.T) {
+	a := testAnalyzer
+
+	forms := a.PhraseFormsConcordant("Татаро-башкирская служба Радио Свобода")
+	for _, want := range []string{
+		"Татаро-башкирской службы Радио Свобода",
+		"Татаро-башкирской службой Радио Свобода",
+		"Татаро-башкирскую службу Радио Свобода",
+	} {
+		if !slices.Contains(forms, want) {
+			t.Errorf("missing %q in %v", want, forms)
+		}
+	}
+}
+
+func TestPhraseFormsConcordant_YoFallback(t *testing.T) {
+	a := testAnalyzer
+
+	// "объединенный" is spelled with "е" in texts but stored as "объединённый"
+	if tag := a.Tag("объединенный"); tag == "" {
+		t.Fatal("Tag(объединенный) = \"\", want the tag of объединённый")
+	}
+
+	forms := a.PhraseFormsConcordant("объединенный институт")
+	if !slices.Contains(forms, "объединенным институтом") {
+		t.Errorf("missing yo-free form: %v", forms)
+	}
+	for _, f := range forms {
+		if strings.ContainsRune(f, 'ё') {
+			t.Errorf("form %q introduced ё although the source used е", f)
+		}
+	}
+
+	// Words found as-is keep the dictionary spelling
+	if forms := a.PhraseFormsConcordant("день защитника отечества"); !slices.Contains(forms, "днём защитника отечества") {
+		t.Errorf("dictionary ё spelling lost: %v", forms)
+	}
+}
+
+func TestPhraseFormsConcordant_PunctuationPreserved(t *testing.T) {
+	a := testAnalyzer
+
+	phrase := "За Украину, за их и за нашу свободу!"
+	forms := a.PhraseFormsConcordant(phrase)
+	if len(forms) < 2 {
+		t.Fatalf("expected declined forms, got %v", forms)
+	}
+	for _, f := range forms {
+		if !strings.Contains(f, ",") || !strings.HasSuffix(f, "!") {
+			t.Errorf("form %q lost punctuation", f)
+		}
+		if !strings.HasPrefix(f, "За ") {
+			t.Errorf("form %q lost the case of the leading service word", f)
+		}
+	}
+}

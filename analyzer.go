@@ -62,7 +62,7 @@ func (a *Analyzer) WordForms(word string) []string {
 		return nil
 	}
 
-	entries := a.words.get(lower)
+	entries, dictWord := a.lookupEntries(lower)
 	if len(entries) == 0 {
 		return nil
 	}
@@ -76,7 +76,7 @@ func (a *Analyzer) WordForms(word string) []string {
 		return nil
 	}
 
-	stem, ok := a.extractStem(lower, para, n, int(e.formIdx))
+	stem, ok := a.extractStem(dictWord, para, n, int(e.formIdx))
 	if !ok {
 		return nil
 	}
@@ -84,7 +84,7 @@ func (a *Analyzer) WordForms(word string) []string {
 	seen := make(map[string]struct{}, n)
 	forms := make([]string, 0, n)
 	for i := 0; i < n; i++ {
-		f := applyCase(paradigmPrefixes[para[2*n+i]]+stem+a.suffixes[para[i]], style)
+		f := applyCase(restoreYo(lower, dictWord, paradigmPrefixes[para[2*n+i]]+stem+a.suffixes[para[i]]), style)
 		if _, dup := seen[f]; !dup {
 			seen[f] = struct{}{}
 			forms = append(forms, f)
@@ -99,8 +99,11 @@ func (a *Analyzer) WordForms(word string) []string {
 // Returns an empty string if the word is not found in the dictionary
 func (a *Analyzer) Tag(word string) string {
 	word = strings.ToLower(strings.TrimSpace(word))
-	entries := a.words.get(word)
+	entries, _ := a.lookupEntries(word)
 	if len(entries) == 0 {
+		if _, last, ok := splitHyphen(word); ok {
+			return a.Tag(last)
+		}
 		return ""
 	}
 	return a.bestTag(entries)
@@ -142,43 +145,45 @@ func (a *Analyzer) bestTag(entries []wordEntry) string {
 // while keeping adjective–noun agreement intact
 //
 // The first noun (or pronoun) is treated as the grammatical head.
-// For every case × number combination the head is declined, and any
-// preceding adjectives/participles are agreed in case, number, gender, and animacy.
-// Nouns other than the head (genitive dependents, e.g. "защитника отечества" in
-// "день защитника отечества") are left in their original form.
+// For every case × number combination the head is declined, and adjectives and
+// participles standing *before* it are agreed in case, number, gender, and
+// animacy. Everything after the head belongs to a dependent group
+// ("оборонных исследований" in "институт оборонных исследований") and is left
+// in its original form, nouns included.
+// Hyphenated words missing from the dictionary are inflected through their last
+// segment ("татаро-башкирская" → "татаро-башкирской"), and words spelled with
+// "е" instead of "ё" are looked up through their "ё" spelling while keeping the
+// original spelling in the result.
 // Prepositions, conjunctions, and words not found in the dictionary are
 // left unchanged. Quoted segments (using any quote style: "", «», „", ” etc.)
 // are always preserved verbatim and never declined.
+// Letter case and punctuation of the source phrase are preserved.
 // The original phrase is always the first element of the returned slice
 func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 	origPhrase := strings.TrimSpace(phrase)
-	lowerPhrase := strings.ToLower(origPhrase)
-	tokens := tokenizePhrase(lowerPhrase)
+	tokens := tokenizePhrase(origPhrase)
 	if len(tokens) == 0 {
 		return nil
 	}
 
-	// Detect case styles from original phrase tokens
-	origTokens := tokenizePhrase(origPhrase)
 	styles := make([]caseStyle, len(tokens))
-	for i := range tokens {
-		if i < len(origTokens) && !tokens[i].quoted {
-			styles[i] = detectCase(origTokens[i].text)
+	for i, t := range tokens {
+		if !t.quoted {
+			styles[i] = detectCase(t.orig)
 		}
 	}
 
 	if len(tokens) == 1 && !tokens[0].quoted {
-		w := tokens[0].text
-		forms := a.WordForms(w)
+		t := tokens[0]
+		forms := a.WordForms(t.text)
 		if forms == nil {
 			return []string{origPhrase}
 		}
-		// Apply original case to all forms
 		for i := range forms {
-			forms[i] = applyCase(forms[i], styles[0])
+			forms[i] = applyCase(forms[i], styles[0]) + t.punct
 		}
 		// Ensure the input form is first.
-		target := applyCase(w, styles[0])
+		target := applyCase(t.text, styles[0]) + t.punct
 		if forms[0] != target {
 			for i, f := range forms {
 				if f == target {
@@ -192,6 +197,7 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 
 	type wordInfo struct {
 		pos     string
+		tag     string
 		animacy string
 		gender  string
 	}
@@ -209,6 +215,7 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 		pos := tagPOS(tag)
 		infos[i] = wordInfo{
 			pos:     pos,
+			tag:     tag,
 			animacy: tagGrammeme(tag, []string{"anim", "inan"}),
 			gender:  tagGrammeme(tag, []string{"masc", "femn", "neut"}),
 		}
@@ -233,7 +240,7 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 			declined := make([]string, len(tokens))
 			for i, t := range tokens {
 				if t.quoted || serviceWords[t.text] {
-					declined[i] = t.text
+					declined[i] = t.orig + t.punct
 					continue
 				}
 				var raw string
@@ -245,11 +252,26 @@ func (a *Analyzer) PhraseFormsConcordant(phrase string) []string {
 						raw = t.text
 					}
 				case "ADJF", "PRTF":
-					raw = a.inflectAdj(t.text, cas, number, head.gender, head.animacy)
+					// Only modifiers standing before the head agree with it.
+					// Adjectives after the head belong to a dependent group
+					// ("оборонных исследований") and keep their own case.
+					if i < headIdx {
+						var extra []string
+						if infos[i].pos == "PRTF" {
+							extra = participleGrammemes(infos[i].tag)
+						}
+						raw = a.inflectAdj(t.text, cas, number, head.gender, head.animacy, extra...)
+					} else {
+						raw = t.text
+					}
 				default:
 					raw = t.text
 				}
-				declined[i] = applyCase(raw, styles[i])
+				if raw == t.text {
+					declined[i] = t.orig + t.punct
+					continue
+				}
+				declined[i] = applyCase(raw, styles[i]) + t.punct
 			}
 			form := strings.Join(declined, " ")
 			if _, ok := seen[form]; !ok {
@@ -311,9 +333,14 @@ func applyCase(word string, style caseStyle) string {
 }
 
 // phraseToken is a single element of a tokenized phrase.
+// text is the lowercased word body used for dictionary lookups, orig keeps the
+// original spelling, and punct holds the punctuation trailing the word
+// (stripped before lookup, restored when the form is rendered).
 // quoted tokens are quoted segments that must not be declined.
 type phraseToken struct {
 	text   string
+	orig   string
+	punct  string
 	quoted bool
 }
 
@@ -361,7 +388,8 @@ func tokenizePhrase(s string) []phraseToken {
 			if i < len(runes) {
 				i++ // include closing quote
 			}
-			tokens = append(tokens, phraseToken{text: string(runes[start:i]), quoted: true})
+			seg := string(runes[start:i])
+			tokens = append(tokens, phraseToken{text: strings.ToLower(seg), orig: seg, quoted: true})
 		} else {
 			// plain word: consume until whitespace or opening quote
 			start := i
@@ -371,13 +399,18 @@ func tokenizePhrase(s string) []phraseToken {
 				}
 				i++
 			}
-			// strip trailing punctuation
+			// strip trailing punctuation, but keep it for rendering
 			end := i
 			for end > start && trailingPunct[runes[end-1]] {
 				end--
 			}
 			if end > start {
-				tokens = append(tokens, phraseToken{text: string(runes[start:end]), quoted: false})
+				word := string(runes[start:end])
+				tokens = append(tokens, phraseToken{
+					text:  strings.ToLower(word),
+					orig:  word,
+					punct: string(runes[end:i]),
+				})
 			}
 		}
 	}
@@ -469,10 +502,20 @@ func (a *Analyzer) loadParadigms(raw []byte) error {
 
 // inflect declines word to the requested case/number/gender/animacy
 // Empty strings for gender and animacy mean "don't care"
+// extra lists additional grammemes the target form must carry (used to keep a
+// participle in its own voice and tense, so "объединенный" does not turn into
+// "объединивший")
 // All parses are tried in POS-priority order; returns the original word if no match found
-func (a *Analyzer) inflect(word, cas, number, gender, animacy string) string {
-	entries := a.words.get(word)
+func (a *Analyzer) inflect(word, cas, number, gender, animacy string, extra ...string) string {
+	entries, dictWord := a.lookupEntries(word)
 	if len(entries) == 0 {
+		prefix, last, ok := splitHyphen(word)
+		if !ok {
+			return word
+		}
+		if inflected := a.inflect(last, cas, number, gender, animacy, extra...); inflected != last {
+			return prefix + inflected
+		}
 		return word
 	}
 
@@ -488,13 +531,14 @@ func (a *Analyzer) inflect(word, cas, number, gender, animacy string) string {
 	for _, e := range sorted {
 		para := a.paradigms[e.paradigmID]
 		n := len(para) / 3
-		stem, ok := a.extractStem(word, para, n, int(e.formIdx))
+		stem, ok := a.extractStem(dictWord, para, n, int(e.formIdx))
 		if !ok {
 			continue
 		}
 		for i := 0; i < n; i++ {
-			if tagMatches(a.gramtab[para[n+i]], cas, number, gender, animacy) {
-				return paradigmPrefixes[para[2*n+i]] + stem + a.suffixes[para[i]]
+			if tagMatches(a.gramtab[para[n+i]], cas, number, gender, animacy, extra...) {
+				form := paradigmPrefixes[para[2*n+i]] + stem + a.suffixes[para[i]]
+				return restoreYo(word, dictWord, form)
 			}
 		}
 	}
@@ -517,7 +561,7 @@ func (a *Analyzer) entryPriority(e wordEntry) int {
 
 // inflectAdj inflects an adjective, applying the Russian accusative rule:
 // inanimate accusative is identical to nominative; animate is identical to genitive
-func (a *Analyzer) inflectAdj(word, cas, number, gender, animacy string) string {
+func (a *Analyzer) inflectAdj(word, cas, number, gender, animacy string, extra ...string) string {
 	effectiveCas := cas
 	if cas == "accs" {
 		switch {
@@ -543,7 +587,65 @@ func (a *Analyzer) inflectAdj(word, cas, number, gender, animacy string) string 
 	if number == "plur" {
 		g = ""
 	}
-	return a.inflect(word, effectiveCas, number, g, "")
+	return a.inflect(word, effectiveCas, number, g, "", extra...)
+}
+
+// lookupEntries returns dictionary entries for word. The dictionary stores "ё"
+// spellings ("объединённый"), while real texts often use "е", so when the exact
+// spelling is missing every single е→ё replacement is tried. The spelling that
+// actually matched is returned alongside the entries
+func (a *Analyzer) lookupEntries(word string) ([]wordEntry, string) {
+	if entries := a.words.get(word); len(entries) > 0 {
+		return entries, word
+	}
+	for _, variant := range yoVariants(word) {
+		if entries := a.words.get(variant); len(entries) > 0 {
+			return entries, variant
+		}
+	}
+	return nil, word
+}
+
+// yoVariants returns the spellings of word with a single "е" replaced by "ё"
+func yoVariants(word string) []string {
+	if !strings.ContainsRune(word, 'е') {
+		return nil
+	}
+	runes := []rune(word)
+	variants := make([]string, 0, 4)
+	for i, r := range runes {
+		if r != 'е' {
+			continue
+		}
+		v := make([]rune, len(runes))
+		copy(v, runes)
+		v[i] = 'ё'
+		variants = append(variants, string(v))
+	}
+	return variants
+}
+
+// restoreYo drops the "ё" of a generated form when the word was only found in
+// the dictionary through an е→ё fallback, so forms keep the source spelling
+// ("объединенный" → "объединенным", not "объединённым"). Words found as-is keep
+// the dictionary spelling ("день" → "днём")
+func restoreYo(word, dictWord, form string) string {
+	if word == dictWord {
+		return form
+	}
+	return strings.ReplaceAll(form, "ё", "е")
+}
+
+// splitHyphen splits a hyphenated word into its left part and the last segment,
+// e.g. "татаро-башкирская" → "татаро-", "башкирская". Such compounds are
+// usually absent from the dictionary while their last segment is present and
+// carries the inflection
+func splitHyphen(word string) (prefix, last string, ok bool) {
+	i := strings.LastIndexByte(word, '-')
+	if i <= 0 || i == len(word)-1 {
+		return "", "", false
+	}
+	return word[:i+1], word[i+1:], true
 }
 
 // extractStem strips the paradigm prefix and suffix of form formIdx from word,
@@ -580,9 +682,34 @@ func tagGrammeme(tag string, candidates []string) string {
 
 // tagMatches reports whether tag contains all of the specified grammemes
 // An empty string for any parameter means "don't care"
-func tagMatches(tag, cas, number, gender, animacy string) bool {
-	return (cas == "" || strings.Contains(tag, cas)) &&
+func tagMatches(tag, cas, number, gender, animacy string, extra ...string) bool {
+	if !((cas == "" || strings.Contains(tag, cas)) &&
 		(number == "" || strings.Contains(tag, number)) &&
 		(gender == "" || strings.Contains(tag, gender)) &&
-		(animacy == "" || strings.Contains(tag, animacy))
+		(animacy == "" || strings.Contains(tag, animacy))) {
+		return false
+	}
+	for _, g := range extra {
+		if g != "" && !strings.Contains(tag, g) {
+			return false
+		}
+	}
+	return true
+}
+
+// participleGrammemes returns the voice/tense/aspect grammemes of a participle
+// tag. Keeping them fixed while declining prevents jumping to another
+// participle of the same verb
+func participleGrammemes(tag string) []string {
+	var g []string
+	for _, candidates := range [][]string{
+		{"actv", "pssv"},
+		{"past", "pres"},
+		{"perf", "impf"},
+	} {
+		if v := tagGrammeme(tag, candidates); v != "" {
+			g = append(g, v)
+		}
+	}
+	return g
 }
